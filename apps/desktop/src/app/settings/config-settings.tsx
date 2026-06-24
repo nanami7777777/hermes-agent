@@ -21,7 +21,6 @@ import type { ConfigFieldSchema, HermesConfigRecord } from '@/types/hermes'
 import { CONTROL_TEXT, EMPTY_SELECT_VALUE, FIELD_DESCRIPTIONS, FIELD_LABELS, SECTIONS } from './constants'
 import { fieldCopyForSchemaKey } from './field-copy'
 import { enumOptionsFor, getNested, prettyName, setNested } from './helpers'
-import { MemoryConnect } from './memory/connect'
 import { ModelSettings } from './model-settings'
 import { EmptyState, ListRow, LoadingState, SettingsContent } from './primitives'
 import { ProviderConfigPanel } from './provider-config-panel'
@@ -32,8 +31,7 @@ function ConfigField({
   value,
   enumOptions,
   optionLabels,
-  onChange,
-  descriptionExtra
+  onChange
 }: {
   schemaKey: string
   schema: ConfigFieldSchema
@@ -41,7 +39,6 @@ function ConfigField({
   enumOptions?: string[]
   optionLabels?: Record<string, string>
   onChange: (value: unknown) => void
-  descriptionExtra?: ReactNode
 }) {
   const { t } = useI18n()
   const c = t.settings.config
@@ -67,17 +64,8 @@ function ConfigField({
       ? rawDescription
       : undefined
 
-  const descriptionNode: ReactNode = descriptionExtra ? (
-    <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
-      {description}
-      {descriptionExtra}
-    </span>
-  ) : (
-    description
-  )
-
   const row = (action: ReactNode, wide = false) => (
-    <ListRow action={action} description={descriptionNode} title={label} wide={wide} />
+    <ListRow action={action} description={description} title={label} wide={wide} />
   )
 
   if (schema.type === 'boolean') {
@@ -370,11 +358,6 @@ export function ConfigSettings({
           {fields.map(([key, field]) => (
             <div className="scroll-mt-6 rounded-lg" id={`setting-field-${key}`} key={key}>
               <ConfigField
-                descriptionExtra={
-                  key === 'memory.provider' && Boolean(getNested(config, key)) ? (
-                    <MemoryConnect provider={String(getNested(config, key))} />
-                  ) : undefined
-                }
                 enumOptions={
                   key === 'tts.elevenlabs.voice_id'
                     ? enumOptionsFor(key, getNested(config, key), config, elevenLabsVoiceOptions ?? undefined)

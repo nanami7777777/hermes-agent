@@ -7,14 +7,8 @@ import {
   useState
 } from 'react'
 
-import {
-  POPOUT_ESTIMATED_HEIGHT,
-  POPOUT_WIDTH_REM,
-  readPopoutBounds,
-  setComposerPopoutPosition,
-  type PopoutPosition,
-  type PopoutSize
-} from '@/store/composer-popout'
+import type { PopoutPosition } from '@/store/composer-popout'
+import { POPOUT_WIDTH_REM, setComposerPopoutPosition } from '@/store/composer-popout'
 
 // Floating surface long-press before it becomes draggable (the 5px platform drags
 // instantly; this only covers grabbing the composer body itself).
@@ -88,23 +82,6 @@ function dockProximityOf(rect: DOMRect) {
   return v * h
 }
 
-const clampOffset = (value: number, max: number) => Math.min(Math.max(0, value), max)
-
-/** Fixed-position composer uses bottom/right insets; keep the grab point under the pointer. */
-function popoutPositionUnderPointer(
-  clientX: number,
-  clientY: number,
-  grabX: number,
-  grabY: number,
-  boxWidth: number,
-  boxHeight: number
-): PopoutPosition {
-  return {
-    bottom: window.innerHeight - clientY + grabY - boxHeight,
-    right: window.innerWidth - clientX + grabX - boxWidth
-  }
-}
-
 /**
  * Gesture pop-out / dock for the composer — fully gestural, no hold-to-toggle.
  *
@@ -146,21 +123,20 @@ export function useComposerPopoutGestures({
   }, [clearTimer])
 
   const beginFloatDrag = useCallback(
-    (state: PressState, clientX: number, clientY: number, next: PopoutPosition, size?: PopoutSize) => {
+    (state: PressState, clientX: number, clientY: number, next: PopoutPosition) => {
       clearTimer()
-      const clamped = setComposerPopoutPosition(next, { area: readPopoutBounds(composerRef.current), size })
-      liveRef.current = clamped
+      liveRef.current = setComposerPopoutPosition(next)
 
       state.mode = 'float'
       state.armed = true
-      state.startBottom = clamped.bottom
-      state.startRight = clamped.right
+      state.startBottom = next.bottom
+      state.startRight = next.right
       state.startX = clientX
       state.startY = clientY
 
       setDragging(true)
     },
-    [clearTimer, composerRef]
+    [clearTimer]
   )
 
   const peelOffFromDock = useCallback(
@@ -171,16 +147,21 @@ export function useComposerPopoutGestures({
         return
       }
 
+      // The docked composer is full-width; the floating one is compact. Center it
+      // horizontally on the cursor (the docked grab-X is meaningless at the new
+      // width), but preserve the vertical grab offset so the pointer keeps its
+      // spot (grab the top → stay at the top).
       const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
       const rect = composer.getBoundingClientRect()
       const boxWidth = POPOUT_WIDTH_REM * rem
-      const boxHeight = POPOUT_ESTIMATED_HEIGHT
-      const grabX = clampOffset(state.startX - rect.left, boxWidth)
-      const grabY = clampOffset(state.startY - rect.top, boxHeight)
-      const next = popoutPositionUnderPointer(clientX, clientY, grabX, grabY, boxWidth, boxHeight)
+      const grabY = Math.min(Math.max(0, state.startY - rect.top), rect.height)
+      const next: PopoutPosition = {
+        bottom: window.innerHeight - (clientY - grabY + rect.height),
+        right: window.innerWidth - clientX - boxWidth / 2
+      }
 
-      beginFloatDrag(state, clientX, clientY, next, { height: boxHeight, width: boxWidth })
       onPopOutRef.current()
+      beginFloatDrag(state, clientX, clientY, next)
     },
     [beginFloatDrag, composerRef]
   )
@@ -258,19 +239,15 @@ export function useComposerPopoutGestures({
         return
       }
 
-      const composer = composerRef.current
-      const size = composer ? { height: composer.offsetHeight, width: composer.offsetWidth } : undefined
+      liveRef.current = setComposerPopoutPosition({
+        bottom: state.startBottom - (pending.y - state.startY),
+        right: state.startRight - (pending.x - state.startX)
+      })
 
-      liveRef.current = setComposerPopoutPosition(
-        {
-          bottom: state.startBottom - (pending.y - state.startY),
-          right: state.startRight - (pending.x - state.startX)
-        },
-        { area: readPopoutBounds(composer), size }
-      )
+      const rect = composerRef.current?.getBoundingClientRect()
 
-      if (composer) {
-        setDockProximity(dockProximityOf(composer.getBoundingClientRect()))
+      if (rect) {
+        setDockProximity(dockProximityOf(rect))
       }
     }
 
@@ -320,15 +297,13 @@ export function useComposerPopoutGestures({
       cancelRaf()
 
       if (state.armed && state.mode === 'float') {
-        const composer = composerRef.current
-        const rect = composer?.getBoundingClientRect()
+        const rect = composerRef.current?.getBoundingClientRect()
 
         if (rect && dockProximityOf(rect) >= 1) {
           onDock()
         } else {
           // Persist the resting position once, on release — never per move.
-          const size = composer ? { height: composer.offsetHeight, width: composer.offsetWidth } : undefined
-          setComposerPopoutPosition(liveRef.current, { area: readPopoutBounds(composer), persist: true, size })
+          setComposerPopoutPosition(liveRef.current, true)
         }
       }
 

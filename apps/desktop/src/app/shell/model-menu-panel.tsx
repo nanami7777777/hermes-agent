@@ -326,10 +326,8 @@ export function ModelMenuPanel({ gateway, onSelectModel, requestGateway }: Model
 }
 
 // Collapsed we show the user's chosen models (or the curated default); typing
-// spans every available model so anything is reachable past the cut. A search
-// is itself a narrowing action, so we do NOT cap per-provider matches — a
-// provider serving 19 models (e.g. opencode-go) must show all 19 when the user
-// searches for it, not a truncated subset. (#47077 follow-up)
+// spans every available model so anything is reachable past the cut.
+const PER_PROVIDER_SEARCH = 12
 
 function groupModels(
   providers: ModelOptionProvider[],
@@ -376,7 +374,11 @@ function groupModels(
         ? allFamilies.find(family => family.id === current.model || family.fastId === current.model)?.id
         : undefined
 
-    const families = allFamilies.filter(family => shown.has(family.id) || family.id === activeId)
+    let families = allFamilies.filter(family => shown.has(family.id) || family.id === activeId)
+
+    if (q) {
+      families = families.slice(0, PER_PROVIDER_SEARCH)
+    }
 
     if (families.length > 0) {
       groups.push({ families, provider })

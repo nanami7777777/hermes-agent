@@ -61,16 +61,14 @@ export function UpdatesOverlay() {
 
   const behind = status?.behind ?? 0
 
-  const phase: 'idle' | 'applying' | 'manual' | 'guiSkew' | 'error' =
+  const phase: 'idle' | 'applying' | 'manual' | 'error' =
     apply.stage === 'manual'
       ? 'manual'
-      : apply.stage === 'guiSkew'
-        ? 'guiSkew'
-        : apply.applying || apply.stage === 'restart'
-          ? 'applying'
-          : apply.stage === 'error'
-            ? 'error'
-            : 'idle'
+      : apply.applying || apply.stage === 'restart'
+        ? 'applying'
+        : apply.stage === 'error'
+          ? 'error'
+          : 'idle'
 
   const handleClose = (next: boolean) => {
     if (phase === 'applying') {
@@ -79,13 +77,7 @@ export function UpdatesOverlay() {
 
     setUpdateOverlayOpen(next)
 
-    if (
-      !next &&
-      (apply.stage === 'error' ||
-        apply.stage === 'restart' ||
-        apply.stage === 'manual' ||
-        apply.stage === 'guiSkew')
-    ) {
+    if (!next && (apply.stage === 'error' || apply.stage === 'restart' || apply.stage === 'manual')) {
       resetUpdateApplyState()
     }
   }
@@ -103,11 +95,7 @@ export function UpdatesOverlay() {
         {phase === 'applying' && <ApplyingView apply={apply} isBackend={isBackend} />}
 
         {phase === 'manual' && (
-          <ManualView command={apply.command ?? null} message={apply.message} onDone={() => handleClose(false)} />
-        )}
-
-        {phase === 'guiSkew' && (
-          <GuiSkewView message={apply.message} onDone={() => handleClose(false)} />
+          <ManualView command={apply.command ?? 'hermes update'} onDone={() => handleClose(false)} />
         )}
 
         {phase === 'error' && (
@@ -263,46 +251,16 @@ function IdleView({
   )
 }
 
-function ManualView({
-  command,
-  message,
-  onDone
-}: {
-  command: string | null
-  message?: string
-  onDone: () => void
-}) {
+function ManualView({ command, onDone }: { command: string; onDone: () => void }) {
   const { t } = useI18n()
   const u = t.updates
   const [copied, setCopied] = useState(false)
 
   const handleCopy = () => {
-    if (!command) return
     void writeClipboardText(command).then(() => {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1800)
     })
-  }
-
-  // No command (e.g. the Linux sandbox-blocked relaunch): render the explanatory
-  // message + a Done button, not a copy-a-command box.
-  if (!command) {
-    return (
-      <div className="grid gap-5 px-6 pb-6 pt-7 pr-8">
-        <div className="flex flex-col items-center gap-3 text-center">
-          <Terminal className="size-8 text-primary" />
-
-          <DialogTitle className="text-center text-xl">{u.manualTitle}</DialogTitle>
-          <DialogDescription className="text-center text-sm">
-            {message || u.manualPickedUp}
-          </DialogDescription>
-        </div>
-
-        <Button className="font-semibold" onClick={onDone} size="lg" variant="secondary">
-          {u.done}
-        </Button>
-      </div>
-    )
   }
 
   return (
@@ -343,32 +301,6 @@ function ManualView({
       <p className="text-center text-xs text-muted-foreground">
         {u.manualPickedUp}
       </p>
-
-      <Button className="font-semibold" onClick={onDone} size="lg" variant="secondary">
-        {u.done}
-      </Button>
-    </div>
-  )
-}
-
-// Linux GUI/backend skew (#45205): backend updated, but the running desktop app
-// package (AppImage/.deb/.rpm) was NOT changed. Closeable terminal state that
-// tells the user to update/reinstall the desktop app — never claims the GUI was
-// updated.
-function GuiSkewView({ message, onDone }: { message?: string; onDone: () => void }) {
-  const { t } = useI18n()
-  const u = t.updates
-
-  return (
-    <div className="grid gap-5 px-6 pb-6 pt-7 pr-8">
-      <div className="flex flex-col items-center gap-3 text-center">
-        <AlertCircle className="size-8 text-amber-500" />
-
-        <DialogTitle className="text-center text-xl">{u.guiSkewTitle}</DialogTitle>
-        <DialogDescription className="max-w-prose text-center text-sm leading-5 text-muted-foreground">
-          {message || u.guiSkewBody}
-        </DialogDescription>
-      </div>
 
       <Button className="font-semibold" onClick={onDone} size="lg" variant="secondary">
         {u.done}

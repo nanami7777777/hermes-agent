@@ -36,7 +36,6 @@ import { ChatSessionList } from "@/components/ChatSessionList";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
-import { normalizeSessionTitle } from "@/lib/chat-title";
 import { PluginSlot } from "@/plugins";
 import { useTheme } from "@/themes";
 import { useProfileScope } from "@/contexts/useProfileScope";
@@ -64,14 +63,11 @@ function buildWsUrl(
 // (subscriber).  Generated once per mount so a tab refresh starts a fresh
 // channel — the previous PTY child terminates with the old WS, and its
 // channel auto-evicts when no subscribers remain.
-function generateChannelId(scope?: string): string {
-  const prefix = scope ? "chat" : "chat-fresh";
+function generateChannelId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return `${prefix}-${crypto.randomUUID()}`;
+    return crypto.randomUUID();
   }
-  return `${prefix}-${Math.random().toString(36).slice(2)}-${Date.now().toString(
-    36,
-  )}`;
+  return `chat-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
 // Colors for the terminal body.  Matches the dashboard's dark teal canvas
@@ -177,11 +173,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   // tabs because the dep wouldn't change on tab switch.
   const [mobilePanelOpenRaw, setMobilePanelOpenRaw] = useState(false);
   const mobilePanelOpen = isActive && mobilePanelOpenRaw;
-  const { setEnd, setTitle } = usePageHeader();
-  const [sessionTitleState, setSessionTitleState] = useState<{
-    scope: string;
-    title: string | null;
-  }>({ scope: "", title: null });
+  const { setEnd } = usePageHeader();
   const { t } = useI18n();
   const closeMobilePanel = useCallback(() => setMobilePanelOpenRaw(false), []);
   const modelToolsLabel = useMemo(
@@ -215,47 +207,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   // management profile. Changing it remounts the terminal (key below /
   // effect dep) so the user explicitly starts a fresh scoped session.
   const { profile: scopedProfile } = useProfileScope();
-  const channel = useMemo(
-    () => generateChannelId(`${resumeParam ?? ""}\0${scopedProfile}`),
-    [resumeParam, scopedProfile],
-  );
-  const titleScope = `${channel}\0${reconnectNonce}`;
-  const sessionTitle =
-    sessionTitleState.scope === titleScope ? sessionTitleState.title : null;
-  const handleSessionTitleChange = useCallback(
-    (title: string | null) => setSessionTitleState({ scope: titleScope, title }),
-    [titleScope],
-  );
-
-  useEffect(() => {
-    if (!isActive) {
-      setTitle(null);
-      return;
-    }
-
-    setTitle(sessionTitle);
-    return () => setTitle(null);
-  }, [isActive, sessionTitle, setTitle]);
-
-  useEffect(() => {
-    if (!resumeParam) return;
-
-    let cancelled = false;
-
-    api
-      .getSessionDetail(resumeParam, scopedProfile)
-      .then((session) => {
-        if (cancelled) return;
-        handleSessionTitleChange(normalizeSessionTitle(session.title));
-      })
-      .catch(() => {
-        // Best-effort: the PTY-side session.info stream can still supply it.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [resumeParam, scopedProfile, handleSessionTitleChange]);
+  const channel = useMemo(() => generateChannelId(), [resumeParam, scopedProfile]);
 
   useEffect(() => {
     if (!resumeParam) return;
@@ -671,25 +623,6 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       // follow up with the authoritative measurement — at worst Ink
       // reflows once after the PTY boots, which is imperceptible.
       ws.send(`\x1b[RESIZE:${term.cols};${term.rows}]`);
-      // One-shot: a ?learn=<text> param (set by the Skills page "Learn a
-      // skill" panel) is typed into the composer as a /learn command once the
-      // PTY is up. /learn resolves via command.dispatch → a normal agent turn,
-      // so this reuses the existing composer path — no special PTY protocol.
-      const learnSeed = searchParams.get("learn");
-      if (learnSeed) {
-        const next = new URLSearchParams(searchParams);
-        next.delete("learn");
-        setSearchParams(next, { replace: true });
-        const cmd = `/learn ${learnSeed}`.trim();
-        // Delay so Ink's composer has mounted and grabbed focus before input.
-        setTimeout(() => {
-          try {
-            wsRef.current?.send(cmd + "\r");
-          } catch {
-            /* PTY not ready / closed — user can retype */
-          }
-        }, 800);
-      }
     };
 
     ws.onmessage = (ev) => {
@@ -963,7 +896,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                 channel={channel}
                 profile={scopedProfile}
                 onDashboardNewSessionRequest={startFreshDashboardChat}
-                onSessionTitleChange={handleSessionTitleChange}
+                showTools={false}
               />
             </div>
             <ChatSessionList
@@ -1056,13 +989,13 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             aria-label={modelToolsLabel}
             className="flex min-h-0 shrink-0 flex-col gap-3 overflow-hidden lg:h-full lg:w-60"
           >
-            {/* Model picker — keeps the rail thin. */}
+            {/* Model picker (tools card hidden — keeps the rail thin). */}
             <div className="shrink-0">
               <ChatSidebar
                 channel={channel}
                 profile={scopedProfile}
                 onDashboardNewSessionRequest={startFreshDashboardChat}
-                onSessionTitleChange={handleSessionTitleChange}
+                showTools={false}
               />
             </div>
 

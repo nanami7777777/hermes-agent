@@ -1180,7 +1180,7 @@ def test_unmentioned_large_document_observed_without_download(monkeypatch):
     asyncio.run(_run())
 
 
-def test_unmentioned_unsupported_document_observed_and_cached(monkeypatch):
+def test_unmentioned_unsupported_document_observed_without_caching(monkeypatch):
     async def _run():
         adapter = _make_adapter(
             require_mention=True, allowed_chats=["-100"],
@@ -1188,14 +1188,14 @@ def test_unmentioned_unsupported_document_observed_and_cached(monkeypatch):
         )
         store = _FakeSessionStore()
         adapter._session_store = store
-        cache_doc = Mock(return_value="/tmp/program.exe")
+        cache_doc = Mock(return_value="/tmp/malware.exe")
         monkeypatch.setattr("gateway.platforms.base.cache_document_from_bytes", cache_doc)
         file_obj = SimpleNamespace(
-            file_path="documents/program.exe",
+            file_path="documents/malware.exe",
             download_as_bytearray=AsyncMock(return_value=bytearray(b"MZ")),
         )
         document = SimpleNamespace(
-            file_name="program.exe", mime_type="application/x-msdownload",
+            file_name="malware.exe", mime_type="application/x-msdownload",
             file_size=2, get_file=AsyncMock(return_value=file_obj),
         )
         update = SimpleNamespace(
@@ -1204,10 +1204,8 @@ def test_unmentioned_unsupported_document_observed_and_cached(monkeypatch):
 
         await adapter._handle_media_message(update, SimpleNamespace())
 
-        # Any file type is now cached — authorization is the gate, not the
-        # extension. The observed message records a path-pointing note.
-        cache_doc.assert_called_once()
+        cache_doc.assert_not_called()
         _, message, _ = store.messages[0]
-        assert "program.exe" in message["content"]
+        assert "unsupported" in message["content"].lower()
 
     asyncio.run(_run())

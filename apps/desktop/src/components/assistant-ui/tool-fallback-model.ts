@@ -72,46 +72,6 @@ export interface MessageRunningStateSlice {
   }
 }
 
-const FILE_EDIT_TOOL_NAMES = new Set(['edit_file', 'patch', 'write_file'])
-
-export function isFileEditTool(toolName: string): boolean {
-  return FILE_EDIT_TOOL_NAMES.has(toolName)
-}
-
-export interface DiffLineStats {
-  added: number
-  removed: number
-}
-
-export function countDiffLineStats(diff: string): DiffLineStats {
-  let added = 0
-  let removed = 0
-
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('+') && !line.startsWith('+++')) {
-      added += 1
-    } else if (line.startsWith('-') && !line.startsWith('---')) {
-      removed += 1
-    }
-  }
-
-  return { added, removed }
-}
-
-function fileEditPath(args: Record<string, unknown>, result: Record<string, unknown>): string {
-  return (
-    firstStringField(args, ['path', 'file', 'filepath']) ||
-    firstStringField(result, ['path', 'file', 'filepath', 'resolved_path']) ||
-    htmlPathFromInlineDiff(firstStringField(result, ['inline_diff', 'diff']))
-  )
-}
-
-function fileEditBasename(path: string): string {
-  const normalized = path.replace(/\\/g, '/').trim()
-
-  return normalized.split('/').filter(Boolean).pop() || normalized
-}
-
 const TOOL_META: Record<string, ToolMeta> = {
   browser_click: { done: 'Clicked page element', pending: 'Clicking page element', icon: 'globe', tone: 'browser' },
   browser_fill: { done: 'Filled form field', pending: 'Filling form field', icon: 'globe', tone: 'browser' },
@@ -135,7 +95,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   execute_code: { done: 'Ran code', pending: 'Running code', icon: 'terminal', tone: 'terminal' },
   image_generate: { done: 'Generated image', pending: 'Generating image', icon: 'file-media', tone: 'image' },
   list_files: { done: 'Listed files', pending: 'Listing files', icon: 'files', tone: 'file' },
-  patch: { done: 'Patched file', pending: 'Patching file', icon: 'edit', tone: 'file' },
+  patch: { done: 'Patched file', pending: 'Patching file', icon: 'diff', tone: 'file' },
   read_file: { done: 'Read file', pending: 'Reading file', icon: 'file', tone: 'file' },
   search_files: { done: 'Searched files', pending: 'Searching files', icon: 'search', tone: 'file' },
   session_search_recall: {
@@ -837,8 +797,8 @@ function toolPreviewTarget(toolName: string, args: Record<string, unknown>, resu
     return looksLikeUrl(explicit) ? explicit : findFirstUrl(args, result)
   }
 
-  if (isFileEditTool(toolName)) {
-    return htmlPathFromInlineDiff(firstStringField(result, ['inline_diff', 'diff']))
+  if (toolName === 'write_file' || toolName === 'edit_file') {
+    return htmlPathFromInlineDiff(firstStringField(result, ['inline_diff']))
   }
 
   return ''
@@ -898,17 +858,9 @@ function stripDividerLines(value: string): string {
 }
 
 export function inlineDiffFromResult(result: unknown): string {
-  const record = parseMaybeObject(result)
+  const value = parseMaybeObject(result).inline_diff
 
-  for (const key of ['inline_diff', 'diff']) {
-    const value = record[key]
-
-    if (typeof value === 'string' && value.trim()) {
-      return stripInlineDiffChrome(value)
-    }
-  }
-
-  return ''
+  return typeof value === 'string' ? stripInlineDiffChrome(value) : ''
 }
 
 // Falls back to a string only when there's something concrete to render —
@@ -1095,22 +1047,15 @@ function toolSubtitle(
     return command ? compactPreview(command, 120) : 'Executed command'
   }
 
-  if (toolName === 'read_file' || isFileEditTool(toolName)) {
-    const isEdit = isFileEditTool(toolName)
+  if (toolName === 'read_file' || toolName === 'write_file' || toolName === 'edit_file') {
+    const path =
+      firstStringField(argsRecord, ['path', 'file', 'filepath']) ||
+      htmlPathFromInlineDiff(firstStringField(resultRecord, ['inline_diff']))
 
-    const path = isEdit
-      ? fileEditPath(argsRecord, resultRecord)
-      : firstStringField(argsRecord, ['path', 'file', 'filepath'])
-
-    if (path) {
-      return path
-    }
-
-    if (!isEdit) {
-      return fallbackDetailText(argsRecord, resultRecord)
-    }
-
-    return inlineDiffFromResult(resultRecord) ? 'Changed file' : ''
+    return (
+      path ||
+      (firstStringField(resultRecord, ['inline_diff']) ? 'Changed file' : fallbackDetailText(argsRecord, resultRecord))
+    )
   }
 
   if (toolName === 'web_extract') {
@@ -1208,22 +1153,8 @@ function toolDetailText(
     }
   }
 
-  if (isFileEditTool(part.toolName)) {
-    if (inlineDiffFromResult(part.result)) {
-      return ''
-    }
-
-    const summary = firstStringField(resultRecord, ['message', 'summary'])
-
-    if (summary) {
-      return summary
-    }
-
-    if (fileEditPath(argsRecord, resultRecord)) {
-      return ''
-    }
-
-    return fallbackDetailText(argsRecord, resultRecord)
+  if (part.toolName === 'write_file' || part.toolName === 'edit_file') {
+    return inlineDiffFromResult(part.result) ? '' : fallbackDetailText(argsRecord, resultRecord)
   }
 
   if (part.toolName === 'web_search') {
@@ -1322,12 +1253,8 @@ export function toolCopyPayload(part: ToolPart, view: ToolView): { label: string
     }
   }
 
-  if (isFileEditTool(part.toolName)) {
-    if (view.inlineDiff.trim()) {
-      return { label: copy.file, text: view.inlineDiff }
-    }
-
-    const path = fileEditPath(args, result)
+  if (part.toolName === 'write_file' || part.toolName === 'edit_file') {
+    const path = firstStringField(args, ['path', 'file', 'filepath'])
 
     if (path) {
       return { label: copy.path, text: path }
@@ -1377,14 +1304,6 @@ function dynamicTitle(
     }
   }
 
-  if (isFileEditTool(part.toolName)) {
-    const path = fileEditPath(args, result)
-
-    if (path) {
-      return fileEditBasename(path)
-    }
-  }
-
   return fallback
 }
 
@@ -1398,12 +1317,7 @@ export function buildToolView(part: ToolPart, inlineDiff: string): ToolView {
   const title = dynamicTitle(part, argsRecord, resultRecord, baseTitle)
   const titleEnriched = title !== baseTitle
   const baseSubtitle = error || toolSubtitle(part, argsRecord, resultRecord)
-
-  const keepSubtitleWithTitle =
-    part.toolName === 'terminal' ||
-    part.toolName === 'execute_code' ||
-    (isFileEditTool(part.toolName) && Boolean(baseSubtitle.trim()))
-
+  const keepSubtitleWithTitle = part.toolName === 'terminal' || part.toolName === 'execute_code'
   const subtitle = titleEnriched && !error && !keepSubtitleWithTitle ? '' : baseSubtitle
   const detailBody = stripDividerLines(toolDetailText(part, argsRecord, resultRecord))
 
